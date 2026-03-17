@@ -1,8 +1,8 @@
 package main
 
 import (
-	tcp "fishnet/Server/TCP"
 	"fmt"
+	tcp "github.com/lbarcl/fishnet-go/Server"
 	"net"
 )
 

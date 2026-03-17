@@ -1,4 +1,4 @@
-package TCPServer
+package Server
 
 import (
 	"bytes"
@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 var writerPool = sync.Pool{
@@ -20,38 +22,38 @@ var writerPool = sync.Pool{
 var readerPool = sync.Pool{
 	New: func() interface{} {
 		// Initialize with an empty reader placeholder
+
 		return new(gzip.Reader)
 	},
 }
 
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return new(bytes.Buffer)
-	},
-}
+var bufferPool = bytebufferpool.Pool{}
 
-func gunzipFrame(in []byte, maxOut uint32) ([]byte, error) {
-	if len(in) == 0 {
+func gunzipFrame(in *bytebufferpool.ByteBuffer, maxOut uint32, pool *bytebufferpool.Pool) (*bytebufferpool.ByteBuffer, error) {
+	if in.Len() == 0 {
 		return nil, fmt.Errorf("empty gzip frame")
 	}
 
 	reader := readerPool.Get().(*gzip.Reader)
 	defer readerPool.Put(reader)
 
-	if err := reader.Reset(bytes.NewReader(in)); err != nil {
+	if err := reader.Reset(bytes.NewReader(in.Bytes())); err != nil {
 		return nil, err
 	}
 
-	var out bytes.Buffer
-	if _, err := out.ReadFrom(io.LimitReader(reader, int64(maxOut)+1)); err != nil {
+	out := pool.Get()
+
+	if _, err := io.Copy(out, io.LimitReader(reader, int64(maxOut)+1)); err != nil {
+		pool.Put(out)
 		return nil, err
 	}
 
-	if uint32(out.Len()) > maxOut {
+	if uint32(in.Len()) > maxOut {
+		pool.Put(out)
 		return nil, fmt.Errorf("gunzip overflow: decompressed=%d max=%d", out.Len(), maxOut)
 	}
 
-	return out.Bytes(), nil
+	return out, nil
 }
 
 func gzipFrame(in []byte, maxOut uint32) ([]byte, error) {
@@ -62,7 +64,7 @@ func gzipFrame(in []byte, maxOut uint32) ([]byte, error) {
 	writer := writerPool.Get().(*gzip.Writer)
 	defer writerPool.Put(writer)
 
-	buf := bufferPool.Get().(*bytes.Buffer)
+	buf := bufferPool.Get()
 	buf.Reset()
 	defer bufferPool.Put(buf)
 

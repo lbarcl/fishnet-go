@@ -1,10 +1,12 @@
-package TCPServer
+package Server
 
 import (
 	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 const (
@@ -34,6 +36,8 @@ func NewServer(settings Settings) (*Server, error) {
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.listener = listener
+
+	s.bufferPool = bytebufferpool.Pool{}
 
 	return s, nil
 }

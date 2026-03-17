@@ -1,4 +1,4 @@
-package TCPServer
+package Server
 
 import (
 	"crypto/tls"
@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/valyala/bytebufferpool"
 )
 
-func (s *Server) handleFrame(id string, flags FrameFlags, payload []byte) {
+func (s *Server) handleFrame(id string, flags FrameFlags, payload *bytebufferpool.ByteBuffer) {
+	defer s.bufferPool.Put(payload)
+
 	conn, err := s.getConnectionWrapper(id)
 	if err != nil {
 		s.onErrorFunc(id, err)
@@ -19,7 +23,7 @@ func (s *Server) handleFrame(id string, flags FrameFlags, payload []byte) {
 		if hasFlag(flags, FlagTLS) && s.settings.UseTLS {
 			conn.con = tls.Server(conn.con, s.tlsCfg)
 		} else if hasFlag(flags, FlagTLS) {
-			s.onErrorFunc(id, fmt.Errorf("TLS is not enabled on server side. Closing the connection."))
+			s.onErrorFunc(id, fmt.Errorf("TLS is not enabled on server side. Closing the connection"))
 			s.RemoveConnection(id)
 			return
 		}
@@ -27,18 +31,22 @@ func (s *Server) handleFrame(id string, flags FrameFlags, payload []byte) {
 		s.setEstablished(id)
 	}
 
+	outData := payload.Bytes()
 	if hasFlag(flags, FlagGzip) {
-		data, err := gunzipFrame(payload, s.settings.MaxDecompressedBytes)
+		decompressedPayload, err := gunzipFrame(payload, s.settings.MaxDecompressedBytes, &s.bufferPool)
 		if err != nil {
-			s.onErrorFunc(id, fmt.Errorf("Error gunzipping frame: %v", err))
+			s.onErrorFunc(id, fmt.Errorf("error gunzipping frame: %v", err))
 			return
 		}
 
-		payload = data
+		outData = decompressedPayload.Bytes()
+		defer s.bufferPool.Put(decompressedPayload)
 	}
 
 	if s.onDataFunc != nil {
-		s.onDataFunc(id, payload)
+		temp := make([]byte, len(outData))
+		copy(temp, outData)
+		s.onDataFunc(id, temp)
 	}
 }
 
@@ -55,17 +63,6 @@ func (s *Server) handleConnection(id string) {
 		s.RemoveConnection(id)
 		if s.onDisconnectFunc != nil {
 			s.onDisconnectFunc(id)
-		}
-	}()
-
-	// Watcher with exit signal to prevent leaks
-	watcherDone := make(chan struct{})
-	defer close(watcherDone)
-	go func() {
-		select {
-		case <-s.ctx.Done():
-			s.RemoveConnection(id)
-		case <-watcherDone:
 		}
 	}()
 
@@ -93,8 +90,8 @@ func (s *Server) handleConnection(id string) {
 		}
 
 		flags := FrameFlags(headerBuf[4])
-		payload := make([]byte, payloadSize) // Consider sync.Pool for large payloads
-		if _, err := io.ReadFull(conn, payload); err != nil {
+		payload := s.bufferPool.Get() // Consider sync.Pool for large payloads
+		if _, err := io.CopyN(payload, conn, int64(payloadSize)); err != nil {
 			if s.ctx.Err() == nil {
 				s.onErrorFunc(id, err)
 			}
@@ -154,7 +151,7 @@ func (s *Server) getConnectionWrapper(id string) (*Connection, error) {
 
 	conn, ok := s.cons[id]
 	if !ok {
-		return nil, fmt.Errorf("Connection not found for ID: %s", id)
+		return nil, fmt.Errorf("connection not found for ID: %s", id)
 	}
 
 	return conn, nil
