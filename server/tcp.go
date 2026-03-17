@@ -1,4 +1,4 @@
-package Server
+package server
 
 import (
 	"context"
@@ -63,7 +63,7 @@ func (s *Server) Send(id string, payload []byte) error {
 	if s.settings.UseTLS {
 		flags |= repo.FlagTLS
 	}
-	
+
 	if len(payload) > int(s.settings.ZipThreshold) {
 		flags |= repo.FlagGzip
 
