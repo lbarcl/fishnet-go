@@ -80,6 +80,10 @@ func (s *Server) Send(id string, payload []byte) error {
 		return nil
 	}
 
+	if s.settings.UseTLS {
+		flags |= repo.FlagTLS
+	}
+
 	if err := s.sendFrame(id, flags, payload); err != nil {
 		return err
 	}
