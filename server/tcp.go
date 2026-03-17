@@ -16,7 +16,7 @@ func NewServer(settings Settings) (*Server, error) {
 		cons:     make(map[string]*Connection),
 	}
 
-	listener, err := net.Listen("TCP", settings.Addr.String())
+	listener, err := net.Listen("tcp", settings.Addr.String())
 	if err != nil {
 		return nil, err
 	}
