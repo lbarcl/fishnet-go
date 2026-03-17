@@ -21,12 +21,20 @@ func (s *Server) handleFrame(id string, flags repo.FrameFlags, payload *bytebuff
 	}
 
 	if !conn.established {
-		if repo.HasFlag(flags, repo.FlagTLS) && s.settings.UseTLS {
-			conn.con = tls.Server(conn.con, s.tlsCfg)
-		} else if repo.HasFlag(flags, repo.FlagTLS) {
-			s.onErrorFunc(id, fmt.Errorf("TLS is not enabled on server side. Closing the connection"))
-			s.RemoveConnection(id)
-			return
+		if s.settings.UseTLS {
+			if repo.HasFlag(flags, repo.FlagTLS) {
+				conn.con = tls.Server(conn.con, s.tlsCfg)
+			} else {
+				s.onErrorFunc(id, fmt.Errorf("security policy violation: TLS required"))
+				s.RemoveConnection(id)
+				return
+			}
+		} else {
+			if repo.HasFlag(flags, repo.FlagTLS) {
+				s.onErrorFunc(id, fmt.Errorf("client requested TLS but server is plaintext-only"))
+				s.RemoveConnection(id)
+				return
+			}
 		}
 
 		s.setEstablished(id)
