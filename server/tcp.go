@@ -122,7 +122,9 @@ func (s *Server) SetConnection(conn net.Conn) (string, error) {
 	}
 
 	s.cons[id] = &Connection{
-		con: conn,
+		con:              conn,
+		ready:            make(chan struct{}),
+		tlsHandShakeDone: make(chan struct{}),
 	}
 	return id, nil
 }

@@ -61,11 +61,12 @@ func (s *Server) handleFrame(id string, flags repo.FrameFlags, payload *bytebuff
 
 // [4 Bytes payload size][1 Byte flags][N Bytes payload]
 func (s *Server) handleConnection(id string) {
-	conn, err := s.GetConnection(id)
+	connWrap, err := s.getConnectionWrapper(id)
 	if err != nil {
 		s.onErrorFunc(id, err)
 		return
 	}
+	conn := connWrap.con
 
 	// Centralized cleanup
 	defer func() {
@@ -112,9 +113,17 @@ func (s *Server) handleConnection(id string) {
 }
 
 func (s *Server) sendFrame(id string, flags repo.FrameFlags, payload []byte) error {
-	conn, err := s.GetConnection(id)
+	connWrapp, err := s.getConnectionWrapper(id)
 	if err != nil {
 		return err
+	}
+
+	if !connWrapp.established {
+		<-connWrapp.ready
+	}
+
+	if s.settings.UseTLS {
+		<-connWrapp.tlsHandShakeDone
 	}
 
 	if len(payload) > int(s.settings.MaxFrameBytes) {
@@ -129,7 +138,7 @@ func (s *Server) sendFrame(id string, flags repo.FrameFlags, payload []byte) err
 	s.sendLockTheID(id)
 	defer s.sendUnlockTheID(id)
 
-	if _, err := conn.Write(frame); err != nil {
+	if _, err := connWrapp.con.Write(frame); err != nil {
 		return err
 	}
 
@@ -170,7 +179,30 @@ func (s *Server) setEstablished(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if conn, ok := s.cons[id]; ok {
-		conn.established = true
+	conn, ok := s.cons[id]
+	if !ok || conn.established {
+		return
 	}
+
+	// 1. If TLS was wrapped in handleFrame, we must ensure the handshake completes
+	if s.settings.UseTLS {
+		if tc, ok := conn.con.(*tls.Conn); ok {
+			// We run this in a goroutine so it doesn't block the handleFrame caller,
+			// but it blocks the 'sendFrame' callers via the channel.
+			go func() {
+				if err := tc.Handshake(); err != nil {
+					s.onErrorFunc(id, fmt.Errorf("TLS handshake failed: %v", err))
+					s.RemoveConnection(id)
+					return
+				}
+				close(conn.tlsHandShakeDone)
+			}()
+		}
+	} else {
+		// If not using TLS, immediately unblock senders
+		close(conn.tlsHandShakeDone)
+	}
+
+	conn.established = true
+	close(conn.ready) // Unblock the 'ready' gate
 }

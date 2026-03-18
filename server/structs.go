@@ -10,9 +10,11 @@ import (
 )
 
 type Connection struct {
-	con         net.Conn
-	wmu         sync.Mutex
-	established bool
+	con              net.Conn
+	wmu              sync.Mutex
+	established      bool
+	ready            chan struct{}
+	tlsHandShakeDone chan struct{}
 }
 
 type Settings struct {
