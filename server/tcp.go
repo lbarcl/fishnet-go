@@ -60,10 +60,6 @@ func (s *Server) Accept() (string, error) {
 func (s *Server) Send(id string, payload []byte) error {
 	var flags repo.FrameFlags
 
-	if s.settings.UseTLS {
-		flags |= repo.FlagTLS
-	}
-
 	if len(payload) > int(s.settings.ZipThreshold) {
 		flags |= repo.FlagGzip
 
