@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/lbarcl/fishnet-go/repo"
 	"github.com/valyala/bytebufferpool"
@@ -36,6 +37,21 @@ func (c *Client) handleFrame(flags repo.FrameFlags, payload *bytebufferpool.Byte
 	}
 
 	outData := payload.Bytes()
+
+	if repo.HasFlag(flags, repo.FlagPing) {
+		temp := make([]byte, len(outData))
+		copy(temp, outData)
+		var flag repo.FrameFlags
+		flag |= repo.FlagPong
+		c.sendFrame(flag, temp)
+
+		sentTimeUnix := int64(binary.BigEndian.Uint64(temp[:8]))
+		sentTime := time.Unix(sentTimeUnix, 0)
+		duration := time.Since(sentTime)
+		c.Ping = int(duration)
+		return
+	}
+
 	if repo.HasFlag(flags, repo.FlagGzip) {
 		decompressedPayload, err := repo.GunzipFrame(payload, c.settings.MaxDecompressedBytes, &c.bufferPool)
 		if err != nil {

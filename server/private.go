@@ -49,8 +49,15 @@ func (s *Server) handleFrame(id string, flags repo.FrameFlags, payload *bytebuff
 
 		s.setEstablished(id)
 	}
-
 	outData := payload.Bytes()
+
+	if repo.HasFlag(flags, repo.FlagPong) {
+		duration := time.Since(conn.lastPingTime)
+		conn.ping = int(duration.Milliseconds())
+		conn.pongRecived = true
+		conn.lastPongTime = time.Now()
+	}
+
 	if repo.HasFlag(flags, repo.FlagGzip) {
 		decompressedPayload, err := repo.GunzipFrame(payload, s.settings.MaxDecompressedBytes, &s.bufferPool)
 		if err != nil {
@@ -96,6 +103,7 @@ func (s *Server) handleConnection(id string) {
 	}
 
 	headerBuf := make([]byte, 5) // Allocated once outside the loop
+	timeBuf := make([]byte, 8)
 	for {
 		if !connWrap.established && s.settings.UseTLS {
 			if tc, ok := connWrap.con.(*tls.Conn); ok {
@@ -127,6 +135,16 @@ func (s *Server) handleConnection(id string) {
 				s.onErrorFunc(id, err)
 			}
 			return
+		}
+
+		if connWrap.pongRecived {
+			if time.Since(connWrap.lastPongTime).Milliseconds() > int64(time.Second*5) {
+				var flags repo.FrameFlags
+				flags |= repo.FlagPing
+				binary.BigEndian.PutUint64(timeBuf[:8], uint64(time.Now().Unix()))
+				s.sendFrame(id, flags, timeBuf)
+				connWrap.lastPongTime = time.Now()
+			}
 		}
 
 		s.handleFrame(id, flags, payload)

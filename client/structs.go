@@ -24,6 +24,7 @@ type Client struct {
 	cancel     context.CancelFunc
 	bufferPool bytebufferpool.Pool
 	ready      chan struct{}
+	Ping       int
 
 	onDataFunc       func(payload []byte)
 	onErrorFunc      func(err error)

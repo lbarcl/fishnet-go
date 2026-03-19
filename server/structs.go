@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
@@ -15,6 +16,10 @@ type Connection struct {
 	established      bool
 	ready            chan struct{}
 	tlsHandShakeDone chan struct{}
+	ping             int
+	pongRecived      bool
+	lastPingTime     time.Time
+	lastPongTime     time.Time
 }
 
 type Settings struct {
