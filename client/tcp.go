@@ -2,7 +2,6 @@
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"time"
 
@@ -33,25 +32,14 @@ func (c *Client) Connect() error {
 
 	if c.settings.UseTLS {
 		var flags repo.FrameFlags
-		flags |= repo.FlagTLS
+		flags |= repo.FlagRequestTLS
 		if err := c.sendFrame(flags, make([]byte, 0)); err != nil {
 			return err
 		}
-
-		conf := &tls.Config{
-			InsecureSkipVerify: c.settings.TrustUnverifiedCerts,
-		}
-
-		tlsConn := tls.Client(conn, conf)
-		if err := tlsConn.Handshake(); err != nil {
-			return err
-		}
-
-		c.conn = tlsConn
+	} else {
+		c.onConnectFunc()
+		close(c.ready)
 	}
-
-	c.onConnectFunc()
-	close(c.ready)
 
 	go c.listen()
 	return nil
@@ -61,10 +49,6 @@ func (c *Client) Send(payload []byte) error {
 	<-c.ready
 
 	var flags repo.FrameFlags
-
-	if c.settings.UseTLS {
-		flags |= repo.FlagTLS
-	}
 
 	if len(payload) > int(c.settings.ZipThreshold) {
 		flags |= repo.FlagGzip

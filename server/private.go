@@ -22,7 +22,7 @@ func (s *Server) handleFrame(id string, flags repo.FrameFlags, payload *bytebuff
 
 	if !conn.established {
 		if s.settings.UseTLS {
-			if repo.HasFlag(flags, repo.FlagTLS) {
+			if repo.HasFlag(flags, repo.FlagRequestTLS) {
 				conn.con = tls.Server(conn.con, s.tlsCfg)
 			} else {
 				s.onErrorFunc(id, fmt.Errorf("security policy violation: TLS required"))
@@ -30,7 +30,7 @@ func (s *Server) handleFrame(id string, flags repo.FrameFlags, payload *bytebuff
 				return
 			}
 		} else {
-			if repo.HasFlag(flags, repo.FlagTLS) {
+			if repo.HasFlag(flags, repo.FlagRequestTLS) {
 				s.onErrorFunc(id, fmt.Errorf("client requested TLS but server is plaintext-only"))
 				s.RemoveConnection(id)
 				return
@@ -118,14 +118,15 @@ func (s *Server) sendFrame(id string, flags repo.FrameFlags, payload []byte) err
 		return err
 	}
 
-	if !connWrapp.established {
-		<-connWrapp.ready
-	}
+	if repo.HasFlag(flags, repo.FlagStartTLS) {
+		if !connWrapp.established {
+			<-connWrapp.ready
+		}
 
-	if s.settings.UseTLS {
-		<-connWrapp.tlsHandShakeDone
+		if s.settings.UseTLS {
+			<-connWrapp.tlsHandShakeDone
+		}
 	}
-
 	if len(payload) > int(s.settings.MaxFrameBytes) {
 		return fmt.Errorf("payload size exceeds maximum allowed: %d", len(payload))
 	}
@@ -186,17 +187,19 @@ func (s *Server) setEstablished(id string) {
 
 	// 1. If TLS was wrapped in handleFrame, we must ensure the handshake completes
 	if s.settings.UseTLS {
+
+		var flags repo.FrameFlags
+		flags |= repo.FlagStartTLS
+
+		s.sendFrame(id, flags, make([]byte, 0))
+
 		if tc, ok := conn.con.(*tls.Conn); ok {
-			// We run this in a goroutine so it doesn't block the handleFrame caller,
-			// but it blocks the 'sendFrame' callers via the channel.
-			go func() {
-				if err := tc.Handshake(); err != nil {
-					s.onErrorFunc(id, fmt.Errorf("TLS handshake failed: %v", err))
-					s.RemoveConnection(id)
-					return
-				}
-				close(conn.tlsHandShakeDone)
-			}()
+			if err := tc.Handshake(); err != nil {
+				s.onErrorFunc(id, fmt.Errorf("TLS handshake failed: %v", err))
+				s.RemoveConnection(id)
+				return
+			}
+			close(conn.tlsHandShakeDone)
 		}
 	} else {
 		// If not using TLS, immediately unblock senders

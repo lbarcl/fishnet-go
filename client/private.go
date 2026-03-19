@@ -1,6 +1,7 @@
 ﻿package client
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -22,6 +23,23 @@ func (c *Client) handleFrame(flags repo.FrameFlags, payload *bytebufferpool.Byte
 
 		outData = decompressedPayload.Bytes()
 		defer c.bufferPool.Put(decompressedPayload)
+	}
+
+	if c.settings.UseTLS && repo.HasFlag(flags, repo.FlagStartTLS) {
+
+		config := &tls.Config{
+			InsecureSkipVerify: c.settings.TrustUnverifiedCerts,
+		}
+
+		c.conn = tls.Client(c.conn, config)
+		err := c.conn.(*tls.Conn).Handshake()
+		if err != nil {
+			panic(err)
+		}
+
+		c.onConnectFunc()
+		close(c.ready)
+		return
 	}
 
 	if c.onDataFunc != nil {
